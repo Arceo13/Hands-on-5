@@ -3,150 +3,238 @@
 #include <stdlib.h>
 #include <string.h>
 
-extern int yylex();
-extern int yyparse();
-extern FILE *yyin;
-
 void yyerror(const char *s);
+int yylex(void);
 %}
 
 %union {
-    int num;
-    float fnum;
+    int ival;
     char *str;
 }
 
-%token INT RETURN VOID INCLUDE DEFINE CHAR FLOAT_TYPE DOUBLE
-%token IDENTIFIER INTEGER FLOAT_NUM
-%token PLUS MINUS TIMES DIVIDE ASSIGN INCREMENT
-%token LPAREN RPAREN LBRACE RBRACE SEMICOLON COMMA HASH
-%token COMMENT UNKNOWN
+/* Tokens */
+%token <str> ID
+%token <ival> NUMBER
+
+%token INT FLOAT DOUBLE CHAR VOID SHORT
+%token RETURN INCLUDE DEFINE
+%token IF ELSE
+%token INCREMENT
+
+/* Resolver conflicto shift/reduce del dangling else */
+%nonassoc LOWER_THAN_ELSE
+%nonassoc ELSE
+
+/* Precedencia de operadores */
+%left '+' '-'
+%left '*' '/'
+
+%type <ival> expr
 
 %%
 
-program: 
-    global_declarations
+program:
+      translation_unit
     ;
 
-global_declarations:
-    global_declarations global_declaration
-    | global_declaration
+translation_unit:
+      external_decl
+    | translation_unit external_decl
     ;
 
-global_declaration:
-    function_definition
-    | variable_declaration
-    | preprocessor_directive
+external_decl:
+      preprocessor_directive
+    | decl
     ;
 
+/* ---------------------- */
+/* DIRECTIVAS PREPROCESADOR */
+/* ---------------------- */
 preprocessor_directive:
-    HASH INCLUDE STRING
-    | HASH DEFINE IDENTIFIER INTEGER
+      '#' INCLUDE '<' ID '.' ID '>'
+        { printf("Include: <%s.%s>\n", $4, $6); }
+    | '#' INCLUDE ID
+        { printf("Include: %s\n", $3); }
+    | '#' DEFINE ID NUMBER
+        { printf("Define: %s = %d\n", $3, $4); }
+    | '#' DEFINE ID
+        { printf("Define: %s\n", $3); }
     ;
 
-variable_declaration:
-    type IDENTIFIER SEMICOLON
-    | type IDENTIFIER ASSIGN expression SEMICOLON
+decl:
+      global_decl
+    | func_decl
     ;
 
+/* ---------------------- */
+/* DECLARACIONES GLOBALES */
+/* ---------------------- */
+global_decl:
+      type ID ';'
+        { printf("Declaracion global: %s\n", $2); }
+    ;
+
+/* -------------- */
+/* TIPOS DE DATO  */
+/* -------------- */
 type:
-    INT
-    | FLOAT_TYPE
+      INT
+    | FLOAT
+    | DOUBLE
     | CHAR
     | VOID
+    | SHORT
     ;
 
-function_definition:
-    type IDENTIFIER LPAREN parameters RPAREN compound_statement
+/* ----------------------- */
+/* DECLARACION DE FUNCION */
+/* ----------------------- */
+func_decl:
+      type ID '(' param_list_opt ')' block
+        { printf("Funcion declarada: %s\n", $2); }
     ;
 
-parameters:
-    parameter_list
-    | VOID
+/* Parametros */
+param_list_opt:
+      /* vacio */
+    | param_list
+    ;
+
+param_list:
+      param_list ',' param
+    | param
+    ;
+
+param:
+      type ID
+        { printf("Parametro: %s\n", $2); }
+    ;
+
+/* -------- */
+/* BLOQUES  */
+/* -------- */
+block:
+      '{' local_decl_list stmt_list '}'
+    ;
+
+/* declaraciones locales dentro de funciones */
+local_decl_list:
+      local_decl_list local_decl
     | /* vacío */
     ;
 
-parameter_list:
-    parameter_list COMMA parameter
-    | parameter
+local_decl:
+      type ID ';'
+        { printf("Variable local: %s\n", $2); }
     ;
 
-parameter:
-    type IDENTIFIER
+/* ----------- */
+/* INSTRUCCIONES */
+/* ----------- */
+stmt_list:
+      stmt_list stmt
+    | /* vacio */
     ;
 
-compound_statement:
-    LBRACE statements RBRACE
+stmt:
+      expr ';'
+    | ID '=' expr ';'
+        { printf("Asignacion a: %s\n", $1); }
+    | RETURN expr ';'
+        { printf("Return statement\n"); }
+    | func_call ';'
+    | block
+    | if_stmt
     ;
 
-statements:
-    statements statement
-    | /* vacío */
+/* ----------------- */
+/* SENTENCIAS IF     */
+/* ----------------- */
+if_stmt:
+      IF '(' expr ')' stmt %prec LOWER_THAN_ELSE
+    | IF '(' expr ')' stmt ELSE stmt
     ;
 
-statement:
-    variable_declaration
-    | assignment SEMICOLON
-    | expression SEMICOLON
-    | RETURN expression SEMICOLON
-    | compound_statement
+/* ----------------- */
+/* LLAMADAS A FUNCION */
+/* ----------------- */
+func_call:
+      ID '(' arg_list_opt ')'
+        { printf("Llamada a funcion: %s\n", $1); }
     ;
 
-assignment:
-    IDENTIFIER ASSIGN expression
+arg_list_opt:
+      /* vacio */
+    | arg_list
     ;
 
-expression:
-    expression PLUS term
-    | expression MINUS term
-    | term
+arg_list:
+      arg_list ',' expr
+    | expr
     ;
 
-term:
-    term TIMES factor
-    | term DIVIDE factor
-    | factor
-    ;
-
-factor:
-    INTEGER
-    | FLOAT_NUM
-    | IDENTIFIER
-    | IDENTIFIER LPAREN arguments RPAREN
-    | LPAREN expression RPAREN
-    ;
-
-arguments:
-    argument_list
-    | /* vacío */
-    ;
-
-argument_list:
-    argument_list COMMA expression
-    | expression
+/* ----------------- */
+/* EXPRESIONES       */
+/* ----------------- */
+expr:
+      NUMBER
+        { $$ = $1; }
+    | ID
+        { $$ = 0; }
+    | func_call
+        { $$ = 0; }
+    | expr '+' expr
+        { $$ = $1 + $3; }
+    | expr '-' expr
+        { $$ = $1 - $3; }
+    | expr '*' expr
+        { $$ = $1 * $3; }
+    | expr '/' expr
+        { $$ = $1 / $3; }
+    | '(' expr ')'
+        { $$ = $2; }
     ;
 
 %%
 
 void yyerror(const char *s) {
-    fprintf(stderr, "Error sintáctico: %s\n", s);
+    extern int linea;
+    fprintf(stderr, "Error de sintaxis en linea %d: %s\n", linea, s);
 }
 
-int main(int argc, char *argv[]) {
+int main(int argc, char **argv) {
+    extern FILE *yyin;
+    printf("=================================================\n");
+    printf("  COMPILADOR BASICO - Lexer + Parser\n");
+    printf("=================================================\n\n");
+    
     if (argc > 1) {
-        yyin = fopen(argv[1], "r");
-        if (!yyin) {
-            perror("Error al abrir el archivo");
+        FILE *f = fopen(argv[1], "r");
+        if (!f) {
+            fprintf(stderr, "Error: No se pudo abrir el archivo '%s'\n", argv[1]);
             return 1;
         }
-    }
-    
-    printf("Analizando sintácticamente...\n");
-    if (yyparse() == 0) {
-        printf("Análisis sintáctico COMPLETADO - No se encontraron errores\n");
+        yyin = f;
+        printf("Analizando archivo: %s\n\n", argv[1]);
     } else {
-        printf("Análisis sintáctico FALLIDO - Se encontraron errores\n");
+        printf("Leyendo desde entrada estandar...\n\n");
     }
     
-    return 0;
+    int result = yyparse();
+    
+    if (result == 0) {
+        printf("\n=================================================\n");
+        printf("   Analisis completado exitosamente :D \n");
+        printf("=================================================\n");
+    } else {
+        printf("\n=================================================\n");
+        printf("   Analisis completado con errores :c\n");
+        printf("=================================================\n");
+    }
+    
+    if (argc > 1) {
+        fclose(yyin);
+    }
+    
+    return result;
 }
