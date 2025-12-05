@@ -1,4 +1,5 @@
 #include <stdlib.h>
+
 #define SCALE_FACTOR 2
 
 int globalA;
@@ -43,4 +44,5 @@ int main() {
     }
 
     return 0;
+
 }
